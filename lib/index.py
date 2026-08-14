@@ -3,12 +3,19 @@
 Symlinked directories are deliberately not descended into (they're indexed
 as plain, non-directory entries) — this keeps the walk simple and immune to
 symlink cycles without needing a visited-inode tracking scheme.
+
+All mutation (and the read methods that hand out snapshots) goes through a
+lock: main.py runs the watcher's updates on a background thread while
+KeywordQueryEventListener reads the index on the main thread, and without
+this a query iterating `entries()` while the watcher mutates the backing
+dict can raise "dictionary changed size during iteration".
 """
 
 from __future__ import annotations
 
 import os
 import stat as stat_module
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +76,7 @@ class FileIndex:
     def __init__(self) -> None:
         self._entries: dict[str, Entry] = {}
         self._dirs: set[str] = set()
+        self._lock = threading.RLock()
 
     @classmethod
     def build(
@@ -96,21 +104,26 @@ class FileIndex:
         return index
 
     def upsert_entry(self, entry: Entry) -> None:
-        self._entries[entry.path] = entry
-        if entry.is_dir:
-            self._dirs.add(entry.path)
+        with self._lock:
+            self._entries[entry.path] = entry
+            if entry.is_dir:
+                self._dirs.add(entry.path)
 
-    def entries(self):
-        return self._entries.values()
+    def entries(self) -> list[Entry]:
+        with self._lock:
+            return list(self._entries.values())
 
     def directories(self) -> set[str]:
-        return self._dirs
+        with self._lock:
+            return set(self._dirs)
 
     def get(self, path: str) -> Entry | None:
-        return self._entries.get(path)
+        with self._lock:
+            return self._entries.get(path)
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     def add_or_update(self, path: str) -> Entry | None:
         """(Re)index a single path. Used by the watcher on create/modify events."""
@@ -125,14 +138,15 @@ class FileIndex:
         return entry
 
     def remove(self, path: str) -> None:
-        self._entries.pop(path, None)
-        was_dir = path in self._dirs
-        self._dirs.discard(path)
-        if was_dir:
-            prefix = path + "/"
-            for child_path in list(self._entries):
-                if child_path.startswith(prefix):
-                    self._entries.pop(child_path, None)
-            for child_dir in list(self._dirs):
-                if child_dir.startswith(prefix):
-                    self._dirs.discard(child_dir)
+        with self._lock:
+            self._entries.pop(path, None)
+            was_dir = path in self._dirs
+            self._dirs.discard(path)
+            if was_dir:
+                prefix = path + "/"
+                for child_path in list(self._entries):
+                    if child_path.startswith(prefix):
+                        self._entries.pop(child_path, None)
+                for child_dir in list(self._dirs):
+                    if child_dir.startswith(prefix):
+                        self._dirs.discard(child_dir)

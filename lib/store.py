@@ -4,11 +4,18 @@ Two responsibilities live here on purpose: the index cache (so a restarted
 extension has instant search results instead of waiting on a fresh walk)
 and frecency (so "most relevant" survives restarts too). Both are cheap,
 single-file, dependency-free with sqlite3 from the standard library.
+
+main.py shares one Store across the main thread, the background reindex
+thread, and the watcher thread, so the connection is opened with
+check_same_thread=False and every access goes through a lock — sqlite3
+connections aren't safe for unsynchronized concurrent use from multiple
+threads even with that flag, it only lifts the same-thread restriction.
 """
 
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -37,9 +44,11 @@ class Store:
     def __init__(self, db_path: Path | str = DEFAULT_DB_PATH):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path))
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        with self._lock:
+            self._conn.executescript(_SCHEMA)
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -53,7 +62,7 @@ class Store:
     # --- file index persistence ---
 
     def save_index(self, index: FileIndex) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute("DELETE FROM files")
             self._conn.executemany(
                 "INSERT INTO files (path, name, name_lower, dir, is_dir, mtime) "
@@ -65,9 +74,11 @@ class Store:
             )
 
     def load_index(self) -> FileIndex:
-        cur = self._conn.execute(
-            "SELECT path, name, name_lower, dir, is_dir, mtime FROM files"
-        )
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT path, name, name_lower, dir, is_dir, mtime FROM files"
+            )
+            rows = cur.fetchall()
         entries = (
             Entry(
                 path=path,
@@ -77,12 +88,12 @@ class Store:
                 is_dir=bool(is_dir),
                 mtime=mtime,
             )
-            for path, name, name_lower, dir_, is_dir, mtime in cur
+            for path, name, name_lower, dir_, is_dir, mtime in rows
         )
         return FileIndex.from_entries(entries)
 
     def upsert_file(self, entry: Entry) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO files (path, name, name_lower, dir, is_dir, mtime) "
                 "VALUES (?, ?, ?, ?, ?, ?) "
@@ -100,7 +111,7 @@ class Store:
             )
 
     def delete_file(self, path: str) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "DELETE FROM files WHERE path = ? OR path LIKE ?", (path, path + "/%")
             )
@@ -108,14 +119,15 @@ class Store:
     # --- frecency persistence ---
 
     def get_frecency(self, path: str) -> tuple[float, float] | None:
-        row = self._conn.execute(
-            "SELECT score, last_used FROM frecency WHERE path = ?", (path,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT score, last_used FROM frecency WHERE path = ?", (path,)
+            ).fetchone()
         return tuple(row) if row is not None else None
 
     def bump_frecency(self, path: str, increment: float = 1.0) -> None:
         now = time.time()
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO frecency (path, score, last_used) VALUES (?, ?, ?) "
                 "ON CONFLICT(path) DO UPDATE SET "
@@ -124,12 +136,14 @@ class Store:
             )
 
     def top_frecent(self, limit: int = 8) -> list[str]:
-        cur = self._conn.execute(
-            "SELECT path FROM frecency ORDER BY score DESC, last_used DESC LIMIT ?",
-            (limit,),
-        )
-        return [row[0] for row in cur]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT path FROM frecency ORDER BY score DESC, last_used DESC LIMIT ?",
+                (limit,),
+            )
+            return [row[0] for row in cur]
 
     def all_frecency(self) -> list[tuple[str, float, float]]:
-        cur = self._conn.execute("SELECT path, score, last_used FROM frecency")
-        return [tuple(row) for row in cur]
+        with self._lock:
+            cur = self._conn.execute("SELECT path, score, last_used FROM frecency")
+            return [tuple(row) for row in cur]
