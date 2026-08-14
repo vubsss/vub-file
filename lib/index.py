@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import stat as stat_module
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,9 +83,22 @@ class FileIndex:
             index._dirs.add(root)
             entries, dirs = _walk(root, matcher)
             for entry in entries:
-                index._entries[entry.path] = entry
+                index.upsert_entry(entry)
             index._dirs.update(dirs)
         return index
+
+    @classmethod
+    def from_entries(cls, entries: Iterable[Entry]) -> FileIndex:
+        """Bulk-load an index from already-built entries, e.g. from lib/store.py."""
+        index = cls()
+        for entry in entries:
+            index.upsert_entry(entry)
+        return index
+
+    def upsert_entry(self, entry: Entry) -> None:
+        self._entries[entry.path] = entry
+        if entry.is_dir:
+            self._dirs.add(entry.path)
 
     def entries(self):
         return self._entries.values()
@@ -107,9 +121,7 @@ class FileIndex:
             return None
         is_dir = stat_module.S_ISDIR(st.st_mode)
         entry = _make_entry(path, os.path.basename(path), is_dir, st.st_mtime)
-        self._entries[path] = entry
-        if is_dir:
-            self._dirs.add(path)
+        self.upsert_entry(entry)
         return entry
 
     def remove(self, path: str) -> None:
