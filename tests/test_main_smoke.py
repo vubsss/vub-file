@@ -101,6 +101,14 @@ def _install_ulauncher_stub():
     open_action_mod.OpenAction = OpenAction
     action_pkg.OpenAction = open_action_mod
 
+    do_nothing_action_mod = make_module("ulauncher.api.shared.action.DoNothingAction")
+
+    class DoNothingAction:
+        pass
+
+    do_nothing_action_mod.DoNothingAction = DoNothingAction
+    action_pkg.DoNothingAction = do_nothing_action_mod
+
     render_action_mod = make_module("ulauncher.api.shared.action.RenderResultListAction")
 
     class RenderResultListAction:
@@ -113,11 +121,12 @@ def _install_ulauncher_stub():
     result_item_mod = make_module("ulauncher.api.shared.item.ExtensionResultItem")
 
     class ExtensionResultItem:
-        def __init__(self, icon, name, description, on_enter):
+        def __init__(self, icon, name, description, on_enter, on_alt_enter=None):
             self.icon = icon
             self.name = name
             self.description = description
             self.on_enter = on_enter
+            self.on_alt_enter = on_alt_enter
 
     result_item_mod.ExtensionResultItem = ExtensionResultItem
     item_pkg.ExtensionResultItem = result_item_mod
@@ -129,6 +138,7 @@ def _install_ulauncher_stub():
         PreferencesUpdateEvent=PreferencesUpdateEvent,
         ExtensionCustomAction=ExtensionCustomAction,
         OpenAction=OpenAction,
+        DoNothingAction=DoNothingAction,
         RenderResultListAction=RenderResultListAction,
         ExtensionResultItem=ExtensionResultItem,
     )
@@ -177,16 +187,48 @@ def test_empty_query_returns_frecent_files(tmp_path, monkeypatch):
     assert [item.name for item in action.items] == ["opened_before.txt"]
 
 
-def test_item_enter_opens_file_and_records_frecency(tmp_path, monkeypatch):
+def test_results_bind_reveal_to_enter_and_open_to_alt_enter(tmp_path, monkeypatch):
+    (tmp_path / "test_notes.txt").write_text("a")
+    extension = _make_extension(tmp_path, monkeypatch)
+    extension.index = FileIndex.build([str(tmp_path)])
+
+    event = stub.KeywordQueryEvent("test")
+    item = main.KeywordQueryEventListener().on_event(event, extension).items[0]
+
+    path = str(tmp_path / "test_notes.txt")
+    assert item.on_enter.data == {"path": path, "action": "reveal"}
+    assert item.on_alt_enter.data == {"path": path, "action": "open"}
+
+
+def test_item_enter_reveals_file_and_records_frecency(tmp_path, monkeypatch):
     extension = _make_extension(tmp_path, monkeypatch)
     path = str(tmp_path / "some_file.txt")
+    revealed = []
+    monkeypatch.setattr(main, "reveal", revealed.append)
 
-    event = stub.ItemEnterEvent(path)
+    event = stub.ItemEnterEvent({"path": path, "action": "reveal"})
+    action = main.ItemEnterEventListener().on_event(event, extension)
+
+    assert isinstance(action, stub.DoNothingAction)
+    assert revealed == [path]
+    assert extension.store.get_frecency(path) is not None
+
+
+def test_item_alt_enter_opens_file_and_records_frecency(tmp_path, monkeypatch):
+    extension = _make_extension(tmp_path, monkeypatch)
+    path = str(tmp_path / "some_file.txt")
+    monkeypatch.setattr(main, "reveal", _fail_if_called)
+
+    event = stub.ItemEnterEvent({"path": path, "action": "open"})
     action = main.ItemEnterEventListener().on_event(event, extension)
 
     assert isinstance(action, stub.OpenAction)
     assert action.path == path
     assert extension.store.get_frecency(path) is not None
+
+
+def _fail_if_called(path):
+    raise AssertionError("reveal() should not run for the open action")
 
 
 def test_preferences_event_sets_roots_and_max_results(tmp_path, monkeypatch):

@@ -16,6 +16,15 @@ It has zero third-party dependencies: everything (filesystem watching, fuzzy mat
 
 The first time it runs, `vub-file` indexes your search roots (`~` by default) in the background — search results start appearing immediately from the on-disk cache (empty on the very first run) and get more complete as indexing finishes. Every run after that loads instantly from the cache in `~/.cache/vub-file/index.db`.
 
+## Opening results
+
+| Key | Action |
+| --- | --- |
+| <kbd>Enter</kbd> | Open your file manager at the file's folder, with the file selected. |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd> | Open the file itself in its default application. |
+
+Selecting the file needs a file manager implementing the freedesktop.org `org.freedesktop.FileManager1` D-Bus interface — Nautilus, Dolphin, Nemo, Thunar and PCManFM all do, and it's started automatically if it isn't already running. On desktops without it, <kbd>Enter</kbd> falls back to `xdg-open` on the folder, which opens the right directory but can't highlight the file.
+
 ## Preferences
 
 | Preference | Default | Description |

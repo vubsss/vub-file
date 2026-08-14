@@ -12,6 +12,7 @@ import threading
 
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
+from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
 from ulauncher.api.shared.action.ExtensionCustomAction import ExtensionCustomAction
 from ulauncher.api.shared.action.OpenAction import OpenAction
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
@@ -27,6 +28,7 @@ from lib.frecency import Frecency
 from lib.ignore import IgnoreMatcher, Rule, default_rules, load_user_rules
 from lib.index import Entry, FileIndex
 from lib.matcher import search
+from lib.reveal import reveal
 from lib.store import Store
 from lib.watcher import Watcher
 
@@ -61,7 +63,12 @@ def _build_item(entry: Entry) -> ExtensionResultItem:
         icon=ICON,
         name=entry.name,
         description=entry.dir,
-        on_enter=ExtensionCustomAction(entry.path, keep_app_open=False),
+        on_enter=ExtensionCustomAction(
+            {"path": entry.path, "action": "reveal"}, keep_app_open=False
+        ),
+        on_alt_enter=ExtensionCustomAction(
+            {"path": entry.path, "action": "open"}, keep_app_open=False
+        ),
     )
 
 
@@ -123,9 +130,16 @@ class KeywordQueryEventListener(EventListener):
 
 class ItemEnterEventListener(EventListener):
     def on_event(self, event: ItemEnterEvent, extension: VubFileExtension):
-        path = event.get_data()
+        data = event.get_data()
+        path = data["path"]
+        # Revealing a file counts as using it, so both bindings feed frecency.
         extension.frecency.record_open(path)
-        return OpenAction(path)
+
+        if data["action"] == "open":
+            return OpenAction(path)
+
+        reveal(path)
+        return DoNothingAction()
 
 
 class PreferencesEventListener(EventListener):
