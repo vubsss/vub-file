@@ -1,0 +1,40 @@
+{
+  "required_api_version": "^2.0.0",
+  "name": "Vub File",
+  "description": "Fast file search. Type ff to find files by name.",
+  "developer_name": "vubsss",
+  "icon": "images/icon.png",
+  "options": {
+    "query_debounce": 0.05
+  },
+  "preferences": [
+    {
+      "id": "vub_file_kw",
+      "type": "keyword",
+      "name": "Find files",
+      "description": "Search for files by name",
+      "default_value": "ff"
+    },
+    {
+      "id": "search_roots",
+      "type": "input",
+      "name": "Search roots",
+      "description": "Comma-separated list of directories to index",
+      "default_value": "~"
+    },
+    {
+      "id": "max_results",
+      "type": "input",
+      "name": "Max results",
+      "description": "Maximum number of results to show",
+      "default_value": "8"
+    },
+    {
+      "id": "ignore_hidden",
+      "type": "checkbox",
+      "name": "Ignore hidden files",
+      "description": "Skip dotfiles and dot-directories",
+      "default_value": true
+    }
+  ]
+}
