@@ -31,10 +31,14 @@
     },
     {
       "id": "ignore_hidden",
-      "type": "checkbox",
+      "type": "select",
       "name": "Ignore hidden files",
       "description": "Skip dotfiles and dot-directories",
-      "default_value": true
+      "options": [
+        { "value": "true", "text": "Yes" },
+        { "value": "false", "text": "No" }
+      ],
+      "default_value": "true"
     }
   ]
 }
