@@ -129,3 +129,7 @@ class Store:
             (limit,),
         )
         return [row[0] for row in cur]
+
+    def all_frecency(self) -> list[tuple[str, float, float]]:
+        cur = self._conn.execute("SELECT path, score, last_used FROM frecency")
+        return [tuple(row) for row in cur]
